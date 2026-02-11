@@ -1,0 +1,291 @@
+manifest:
+  version: "0.1.3"
+  schema: https://a2as.org/cert/schema
+  subject:
+    name: vvk93/adk_agents
+    source: https://github.com/vvk93/adk_agents
+    branch: main
+    commit: "2faa44b2"
+    scope: [review_analyzer_agent/agent.py, review_analyzer_agent/sub_agents/bug_handling/agent.py, review_analyzer_agent/sub_agents/competitor_research_agent.py,
+      review_analyzer_agent/sub_agents/writer_critic_agent.py]
+  issued:
+    by: A2AS.org
+    at: '2026-02-11T17:06:46Z'
+    url: https://a2as.org/certified/agents/vvk93/adk_agents
+  signatures:
+    digest: sha256:6hdzbMSeuYPPiPezdcm5Z-M7aScYdwYjh2ZVh7AH6z4
+    key: ed25519:01HtXD1x8fVz4a2DeTwcY5uc65nCu1E4cytAiYGCXzc
+    sig: ed25519:pYufyK1iKMxBWzWOWfUgfnMoDPBAdKpG1j59Uoj0HDStlcoTV3GwpH9OssaaDaM5KHg5WiqYln4BSnTwcN8pAQ
+
+agents:
+  bug_handling_agent:
+    type: instance
+    models: [gemini-2.5-flash-preview-05-20]
+    tools: [docker, list_issues, create_issue, get_issue]
+    mcp: [docker]
+    params:
+      name: bug_handler
+      description: This agent handles user reviews that are classified as bug reports. It can process bug details and initiate
+        actions like creating issues on github.
+      instruction: [You are the Bug Handler agent., Your task is to process the provided bug report. First search if provided
+          bug already exists in created issues., 'If yes, return the issue description and link to it. I', f nothing found
+          create a new issue using best practices for sofware bug reports., 'Yous should work with this repository: https://github.com/VVK93/edu-ai-product-engineer-1']
+  competitor_research_agent:
+    type: instance
+    models: [gemini-2.5-flash-preview-05-20]
+    tools: [google_search]
+    params:
+      name: competitor_research_agent
+      instruction: [Use tools to research competitors according to the plan in 'research_plan' output key]
+      output_key: competitors_research
+  critic_agent_in_loop:
+    type: instance
+    models: [gemini-2.0-flash]
+    params:
+      name: CriticAgent
+      include_contents: none
+      instruction: [You are a Constructive Critic AI reviewing a final report about competitor's research. Your goal is balanced
+          feedback., '**Document to Review:**', '```', '{current_document}', '```', '**Task:**', 'Review the document for
+          clarity, engagement, and basic coherence according to the initial topic and plan (if known).', IF you identify 1-2
+          *clear and actionable* ways the report could be improved to better capture the topic or enhance reader engagement,
+        '(e.g., "Needs a stronger opening sentence", "Clarify the character''s goal"):', Provide these specific suggestions
+          concisely. Output *only* the critique text., 'ELSE IF the document is coherent, addresses the topic adequately for
+          its length, and has no glaring errors or obvious omissions:', 'Respond *exactly* with the phrase "No major issues
+          found." and nothing else. It doesn''t need to be perfect, just functionally complete for this stage.', Avoid suggesting
+          purely subjective stylistic preferences if the core is sound., Do not add explanations. Output only the critique
+          OR the exact completion phrase.]
+      description: Reviews the current draft, providing critique if clear improvements are needed, otherwise signals completion.
+      output_key: criticism
+  feature_research_agent:
+    type: instance
+    params:
+      name: feature_research_agent
+      description: This agent handles competitor research. It can process competitor details and add them to a product roadmap
+        or suggest discussion.
+      sub_agents: [planner_agent, research_executor_agent, report_writer_agent, refinement_loop]
+  planner_agent:
+    type: instance
+    models: [gemini-2.5-flash-preview-05-20]
+    params:
+      name: user_demand_agent
+      instruction: [Your task is to develop a plan for research that will include competitor and user demand research., The
+          plan will be executed by other agents with web search tool. Make sure the plan is concise and will provide enough
+          info to generate the final report.]
+      output_key: research_plan
+  refinement_loop:
+    type: instance
+    params:
+      name: RefinementLoop
+      max_iterations: "3"
+      sub_agents: [critic_agent_in_loop, refiner_agent_in_loop]
+  refiner_agent_in_loop:
+    type: instance
+    models: [gemini-2.0-flash]
+    tools: [exit_loop]
+    params:
+      name: RefinerAgent
+      include_contents: none
+      instruction: [You are a Creative Writing Assistant refining a Report based on feedback OR exiting the process., '**Current
+          Report:**', '```', '{final_report}', '```', '**Critique/Suggestions:**', '{criticism}', '**Task:**', Analyze the
+          'Critique/Suggestions'., 'IF the critique is *exactly* "No major issues found.":', You MUST call the 'exit_loop'
+          function. Do not output any text., 'ELSE (the critique contains actionable feedback):', Carefully apply the suggestions
+          to improve the 'Current Report'. Output *only* the refined document text., Do not add explanations. Either output
+          the refined document OR call the exit_loop function.]
+      description: Refines the document based on critique, or calls exit_loop if critique indicates completion.
+      output_key: final_report
+  report_writer_agent:
+    type: instance
+    models: [gemini-2.5-flash-preview-05-20]
+    tools: [server-slack]
+    mcp: [server-slack]
+    params:
+      name: report_writer_agent
+      instruction: ['"', 'Using all the info given from other agents in previous steps - generate a full summary that should
+          include:', full ouputs for competitors_research and user_demand_research, After post it to slack channel C08RTFQEG3D]
+      output_key: final_report
+  research_executor_agent:
+    type: instance
+    params:
+      name: research_planner_agent
+      description: This agent handles competitor research. It can process competitor details and add them to a product roadmap
+        or suggest discussion.
+      sub_agents: [user_demand_research_agent, competitor_research_agent]
+  root_agent:
+    type: instance
+    models: [gemini-2.5-flash-preview-05-20]
+    tools: [read_report]
+    params:
+      name: review_classifier
+      description: This is the main review processing agent. Its primary task is to analyze a user review and classify it
+        as either a 'bug' or a 'feature request'.
+      instruction: ['**Role:** AI Product Manager Assistent', '**Objective:**', 'Analyze the provided report to identify,
+          classify, and prioritize issues and feature requests, then assign them to the appropriate sub-agent for action.',
+        '**Instructions:**', 'You will receive a report detailing user feedback and proposed features. Based on this report:',
+        '1.  **Identify & Classify:**', '*   Extract all distinct user-reported problems and requests.', '*   Classify each
+          item as either a **BUG** (an issue with existing functionality being broken, unstable, or not working as intended)
+          or a **FEATURE REQUEST** (a desire for new functionality or an enhancement to existing functionality).', '2.  **List
+          Classified Items:**', '*   Present a clear, numbered list of all identified items, each with its classification
+          (BUG or FEATURE REQUEST).', '3.  **Prioritize & Assign:**', '*   From your list, determine the top 3-5 items that
+          should be addressed first, based on the report''s content (e.g., user impact, frequency, severity).', '*   For each
+          prioritized item, state its classification and recommend whether it should be handled by:', '*   A "Bug Fixing Sub-Agent"
+          (for BUGs)', '*   A "Feature Development Sub-Agent" (for FEATURE REQUESTS)', '**Output Format:**', '**I. Classified
+          Issues & Requests:**', '1. [Description of item 1] - [BUG/FEATURE REQUEST]', '2. [Description of item 2] - [BUG/FEATURE
+          REQUEST]', "...", '**II. Prioritized Action Plan:**', '1. **[Name of the bug or feature]:** [Description of prioritized
+          item 1]', '*   **Classification:** [BUG/FEATURE REQUEST]', '*   **Reason:** explain the classification']
+      sub_agents: [bug_handling_agent, feature_research_agent]
+  user_demand_research_agent:
+    type: instance
+    models: [gemini-2.5-flash-preview-05-20]
+    tools: [google_search]
+    params:
+      name: user_demand_agent
+      instruction: [Use tools to research user demand according to the plan in 'research_plan' output key]
+      output_key: user_demand_research
+
+models:
+  gemini-2.0-flash:
+    type: literal
+    agents: [critic_agent_in_loop, refiner_agent_in_loop]
+  gemini-2.5-flash-preview-05-20:
+    type: literal
+    agents: [root_agent, bug_handling_agent, competitor_research_agent, user_demand_research_agent, planner_agent, report_writer_agent]
+
+tools:
+  create_issue:
+    type: mcp
+    agents: [bug_handling_agent]
+    mcp: [docker]
+    params:
+      source: tool_filter
+      mcp_server: docker
+  docker:
+    type: mcp
+    agents: [bug_handling_agent]
+    params:
+      class: MCPToolset
+      mcp_server: docker
+  exit_loop:
+    type: function
+    agents: [refiner_agent_in_loop]
+    params:
+      description: Call this function ONLY when the critique indicates no further changes are needed, signaling the iterative
+        process should end.
+  get_issue:
+    type: mcp
+    agents: [bug_handling_agent]
+    mcp: [docker]
+    params:
+      source: tool_filter
+      mcp_server: docker
+  google_search:
+    type: module
+    agents: [competitor_research_agent, user_demand_research_agent]
+  list_issues:
+    type: mcp
+    agents: [bug_handling_agent]
+    mcp: [docker]
+    params:
+      source: tool_filter
+      mcp_server: docker
+  read_report:
+    type: function
+    agents: [root_agent]
+    params:
+      description: |-
+        Reads the file containing report of the product analysis.
+
+        Returns:
+            str: text with the detailed report or error message if file not found.
+  server-slack:
+    type: mcp
+    agents: [report_writer_agent]
+    params:
+      class: MCPToolset
+      mcp_server: server-slack
+
+mcp:
+  docker:
+    type: process
+    agents: [bug_handling_agent]
+    params:
+      class: MCPToolset
+      connection_type: StdioServerParameters
+      command: docker
+      args: [run, -i, --rm, -e, GITHUB_PERSONAL_ACCESS_TOKEN, ghcr.io/github/github-mcp-server]
+      tool_filter: [list_issues, create_issue, get_issue]
+  server-slack:
+    type: process
+    agents: [report_writer_agent]
+    params:
+      class: MCPToolset
+      connection_type: StdioServerParameters
+      command: npx
+      args: [-y, '@modelcontextprotocol/server-slack']
+
+teams:
+  feature_research_agent:
+    type: sequential
+    agents: [feature_research_agent, planner_agent, research_executor_agent, report_writer_agent, refinement_loop]
+  refinement_loop:
+    type: loop
+    agents: [refinement_loop, critic_agent_in_loop, refiner_agent_in_loop]
+  research_executor_agent:
+    type: parallel
+    agents: [research_executor_agent, user_demand_research_agent, competitor_research_agent]
+  root_agent:
+    type: hierarchy
+    agents: [root_agent, bug_handling_agent, feature_research_agent]
+
+imports:
+  agent: agent
+  Agent: google.adk.agents.Agent
+  bug_handling_agent: sub_agents.bug_handling.agent.bug_handling_agent
+  feature_research_agent: sub_agents.competitor_research_agent.feature_research_agent
+  google_search: google.adk.tools.google_search
+  Langfuse: langfuse.Langfuse
+  LlmAgent: google.adk.agents.LlmAgent
+  LoopAgent: google.adk.agents.LoopAgent
+  MCPToolset: google.adk.tools.mcp_tool.mcp_toolset.MCPToolset
+  os: os
+  ParallelAgent: google.adk.agents.ParallelAgent
+  Path: pathlib.Path
+  prompt: prompt
+  refinement_loop: writer_critic_agent.refinement_loop
+  SequentialAgent: google.adk.agents.SequentialAgent
+  StdioServerParameters: google.adk.tools.mcp_tool.mcp_toolset.StdioServerParameters
+  ToolContext: google.adk.tools.tool_context.ToolContext
+
+functions:
+  exit_loop:
+    type: sync
+    module: review_analyzer_agent.sub_agents.writer_critic_agent
+    args: [tool_context]
+  read_report:
+    type: sync
+    module: review_analyzer_agent.agent
+    params:
+      returns: str
+
+files:
+  board_session_report.md:
+    type: literal
+    actions: [read]
+    params:
+      caller: [read_report]
+      path: [Path.parent.resolve]
+  report_path:
+    type: variable
+    actions: [read]
+    params:
+      caller: [open]
+      alias: [f]
+
+networks:
+  cloud.langfuse.com:
+    type: api
+    actions: [GET]
+    urls: [/]
+    protocols: [https]
+    ports: ["443"]
+    params:
+      links: [host]
